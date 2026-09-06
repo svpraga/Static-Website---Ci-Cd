@@ -1,0 +1,58 @@
+name: Deploy static site to S3 + CloudFront
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      # dist/ is the deployable output — this is what's actually served.
+      # source/** is intentionally NOT in this list: this workflow has no
+      # build step, so a source-only change wouldn't touch dist/ and would
+      # trigger a no-op deploy. If you later add a build step that compiles
+      # source/ -> dist/ in this job, add "source/**" back here.
+      - "dist/**"
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: nexwearinnovations.com-1
+
+permissions:
+  id-token: write   # required for OIDC — no long-lived AWS keys needed
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # optional: add a manual approval gate in repo Settings > Environments
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync site to S3
+        run: |
+          # Long-cache everything except index.html (immutable static assets)
+          aws s3 sync ./dist "s3://${S3_BUCKET}" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html"
+
+          # Never cache index.html so new deploys are visible immediately
+          aws s3 cp ./dist/index.html "s3://${S3_BUCKET}/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"
