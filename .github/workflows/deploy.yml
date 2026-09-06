@@ -28,7 +28,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production   # optional: add a manual approval gate in repo Settings > Environments
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
